@@ -1,0 +1,54 @@
+name: Windows allocation diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [baseline, blocking-gc, no-osr]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          global-json-file: global.json
+          dotnet-version: 10.0.x
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4
+        with:
+          version: "0.9.11"
+          enable-cache: false
+      - run: dotnet build tests/LoadingCache.Tests/LoadingCache.Tests.csproj -c Release -f net10.0
+      - name: Fixed-count independent child probes
+        env:
+          PROBE_MODE: ${{ matrix.mode }}
+        shell: bash
+        run: |
+          uv run --no-project python - <<'PYTHON'
+          import collections, json, os, pathlib, subprocess, time
+          output = pathlib.Path('artifacts/allocation-diagnostic')
+          output.mkdir(parents=True, exist_ok=True)
+          env = dict(os.environ)
+          mode = env['PROBE_MODE']
+          if mode == 'blocking-gc':
+              env['DOTNET_gcConcurrent'] = '0'
+          if mode == 'no-osr':
+              env['DOTNET_TC_OnStackReplacement'] = '0'
+          counts = collections.Counter()
+          for i in range(300):
+              start = time.monotonic()
+              p = subprocess.run(['dotnet', 'tests/LoadingCache.Tests/bin/Release/net10.0/LoadingCache.Tests.dll', '--allocation-check', 'counter'], env=env, capture_output=True, text=True, timeout=30)
+              counts[p.returncode] += 1
+              record = dict(index=i, mode=mode, exit=p.returncode, elapsed=time.monotonic()-start, stdout=p.stdout, stderr=p.stderr)
+              (output / f'{i:04}.json').write_text(json.dumps(record), encoding='utf-8')
+          (output / 'summary.json').write_text(json.dumps(dict(mode=mode, counts=dict(counts))), encoding='utf-8')
+          print(mode, dict(counts))
+          PYTHON
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: allocation-${{ matrix.mode }}
+          path: artifacts/allocation-diagnostic
