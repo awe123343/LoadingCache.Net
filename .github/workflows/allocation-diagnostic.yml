@@ -1,5 +1,7 @@
 name: Windows allocation diagnostic
 on:
+  push:
+    branches: [codex/windows-allocation-diagnostic]
   workflow_dispatch:
 permissions:
   contents: read
