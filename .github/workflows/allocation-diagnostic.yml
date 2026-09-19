@@ -15,16 +15,20 @@ jobs:
         mode: [baseline, blocking-gc, no-osr]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 89ed2dc1328eacb00a29f4bf7cbf24ec9ac2dd25
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           global-json-file: global.json
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            8.0.x
+            10.0.x
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4
         with:
           version: "0.9.11"
           enable-cache: false
       - run: dotnet build tests/LoadingCache.Tests/LoadingCache.Tests.csproj -c Release -f net10.0
-      - name: Fixed-count independent child probes
+      - name: Fixed-count original full-suite probes
         env:
           PROBE_MODE: ${{ matrix.mode }}
         shell: bash
@@ -40,9 +44,9 @@ jobs:
           if mode == 'no-osr':
               env['DOTNET_TC_OnStackReplacement'] = '0'
           counts = collections.Counter()
-          for i in range(300):
+          for i in range(20):
               start = time.monotonic()
-              p = subprocess.run(['dotnet', 'tests/LoadingCache.Tests/bin/Release/net10.0/LoadingCache.Tests.dll', '--allocation-check', 'counter'], env=env, capture_output=True, text=True, timeout=30)
+              p = subprocess.run(['dotnet', 'test', 'tests/LoadingCache.Tests/LoadingCache.Tests.csproj', '-c', 'Release', '-f', 'net10.0', '--no-build', '--no-restore', '--logger', f'trx;LogFileName={i:04}.trx', '--results-directory', str(output)], env=env, capture_output=True, text=True, timeout=120)
               counts[p.returncode] += 1
               record = dict(index=i, mode=mode, exit=p.returncode, elapsed=time.monotonic()-start, stdout=p.stdout, stderr=p.stderr)
               (output / f'{i:04}.json').write_text(json.dumps(record), encoding='utf-8')
